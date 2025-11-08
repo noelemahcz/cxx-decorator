@@ -1,0 +1,39 @@
+{
+    "version": 2,
+    "configurePresets": [
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "description": "Debug configuration using Ninja generator",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "description": "Release configuration using Ninja generator",
+            "inherits": "debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug-build",
+            "displayName": "Debug Build",
+            "description": "Debug build using Ninja generator",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release-build",
+            "displayName": "Release Build",
+            "description": "Release build using Ninja generator",
+            "configurePreset": "release"
+        }
+    ]
+}

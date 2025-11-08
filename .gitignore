@@ -1,0 +1,17 @@
+build/
+compile_commands.json
+
+# IDEs
+.idea/
+.vscode/
+
+# Direnv environment variables and cache
+.envrc
+.direnv/
+
+# Debuggers
+.gdbinit
+.lldbinit
+
+# Misc
+.cache/
