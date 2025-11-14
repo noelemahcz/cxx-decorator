@@ -17,7 +17,6 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <format>
-#include <ranges>
 #include <string_view>
 
 
@@ -33,7 +32,6 @@ using clang::tok::TokenKind;
 using llvm::SmallDenseMap;
 using llvm::SmallString;
 using llvm::SmallVector;
-using llvm::StringRef;
 using llvm::raw_svector_ostream;
 
 
@@ -81,7 +79,7 @@ static auto GenerateThunkDefinition(FunctionDecl* def,
   auto const& sm = def->getASTContext().getSourceManager();
   auto const& lang = def->getASTContext().getLangOpts();
 
-  auto const decl_range = def->clang::DeclaratorDecl::getSourceRange();
+  auto const decl_range = def->DeclaratorDecl::getSourceRange();
   auto const end_of_end =
       Lexer::getLocForEndOfToken(decl_range.getEnd(), 0, sm, lang);
   auto const decl_str =
@@ -91,14 +89,18 @@ static auto GenerateThunkDefinition(FunctionDecl* def,
   os << decl_str << " {\n  return " << kDecoratedPrefix << def->getName()
      << '(';
 
-  auto params_str =
-      def->parameters() |
-      std::views::transform([](clang::ParmVarDecl* param) -> StringRef {
-        return param->getName();
-      }) |
-      std::views::join_with(',');
+  auto it = def->param_begin();
+  if (it != def->param_end()) {
+    auto name = (*it)->getName();
+    os << "\n    static_cast<decltype(" + name + ")&&>(" + name + ")";
+    ++it;
 
-  std::ranges::copy(params_str, std::back_inserter(thunk));
+    while (it != def->param_end()) {
+      name = (*it)->getName();
+      os << ",\n    static_cast<decltype(" + name + ")&&>(" + name + ")";
+      ++it;
+    }
+  }
 
   os << ");" << "\n}";
 }
