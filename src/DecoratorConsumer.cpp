@@ -11,8 +11,13 @@
 #include <clang/Lex/Lexer.h>
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SmallString.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <format>
+#include <string_view>
 
 
 using clang::ASTContext;
@@ -25,10 +30,13 @@ using clang::Rewriter;
 using clang::SourceRange;
 using clang::tok::TokenKind;
 using llvm::SmallDenseMap;
+using llvm::SmallString;
 using llvm::SmallVector;
+using llvm::raw_svector_ostream;
 
 
-static constexpr auto kRenamePrefix = "__decorated_";
+static constexpr auto kOriginalPrefix = "__original_";
+static constexpr auto kDecoratedPrefix = "__decorated_";
 
 
 auto DecoratorConsumer::HandleTopLevelDecl(DeclGroupRef /*group*/) -> bool {
@@ -51,13 +59,50 @@ static auto RenameOriginalDecls(PendingDecorations const& decorations,
   for (auto const& d : decorations) {
     auto const name_range = d.func->getNameInfo().getSourceRange();
     auto const new_name =
-        std::format("{}{}", kRenamePrefix, d.func->getName().data());
+        std::format("{}{}", kOriginalPrefix, d.func->getName().data());
     // https://clang.llvm.org/doxygen/classclang_1_1Rewriter.html#a5fd6f665d719a8f2dbd6a6e6b5e1436b
     // This method returns true (and does nothing) if the
     // input location was not rewritable, false otherwise.
     auto const res = rewriter.ReplaceText(name_range, new_name);
     assert(!res);
   }
+}
+
+
+template <unsigned InternalLen>
+static auto GenerateThunkDefinition(FunctionDecl* def,
+                                    SmallString<InternalLen>& thunk) -> void {
+  PRINTLN("GenerateThunkDefinition");
+
+  raw_svector_ostream os{thunk};
+
+  auto const& sm = def->getASTContext().getSourceManager();
+  auto const& lang = def->getASTContext().getLangOpts();
+
+  auto const decl_range = def->DeclaratorDecl::getSourceRange();
+  auto const end_of_end =
+      Lexer::getLocForEndOfToken(decl_range.getEnd(), 0, sm, lang);
+  auto const decl_str =
+      std::string_view(sm.getCharacterData(decl_range.getBegin()),
+                       sm.getCharacterData(end_of_end));
+
+  os << decl_str << " {\n  return " << kDecoratedPrefix << def->getName()
+     << '(';
+
+  auto it = def->param_begin();
+  if (it != def->param_end()) {
+    auto name = (*it)->getName();
+    os << "\n    static_cast<decltype(" + name + ")&&>(" + name + ")";
+    ++it;
+
+    while (it != def->param_end()) {
+      name = (*it)->getName();
+      os << ",\n    static_cast<decltype(" + name + ")&&>(" + name + ")";
+      ++it;
+    }
+  }
+
+  os << ");" << "\n}";
 }
 
 
@@ -167,7 +212,7 @@ auto DecoratorConsumer::HandleTranslationUnit(ASTContext& ctx) -> void {
 
     PRINTLN("IsDefined: true");
 
-    auto const* const def = cano->getDefinition();
+    auto* const def = cano->getDefinition();
     assert(def != nullptr);
 
     PRINTLN("Definition: {}", static_cast<void const*>(def));
@@ -192,10 +237,18 @@ auto DecoratorConsumer::HandleTranslationUnit(ASTContext& ctx) -> void {
     PRINT("InsertLoc Next: ");
     insert_loc.getLocWithOffset(1).dump(sm);
 
-    auto const code =
-        std::format("\nstatic {0} {1} {{{2}{1}}};", deco->getName().data(),
-                    cano->getName().data(), kRenamePrefix);
+    // Generate decorated functor & function wrapper.
 
-    rewriter_.InsertTextAfterToken(end_of_def, code);
+    SmallString<32> thunk;
+    GenerateThunkDefinition(def, thunk);
+
+    // static Decorator __decorated_func{__original_func};
+    // int func(bool b, double d, string s) { return __decorated_func(b,d,s); }
+    auto const generated_src =
+        std::format("\n\nstatic {2} {0}{3} {{{1}{3}}};\n\n{4}",
+                    kDecoratedPrefix, kOriginalPrefix, deco->getName().data(),
+                    cano->getName().data(), thunk.c_str());
+
+    rewriter_.InsertTextAfterToken(end_of_def, generated_src);
   }
 }
